@@ -1,11 +1,19 @@
 # github.com/coreos/go-oidc/v3 v3.0.0
 ## explicit
 github.com/coreos/go-oidc/v3/oidc
+# github.com/danieljoos/wincred v1.1.0
+github.com/danieljoos/wincred
+# github.com/godbus/dbus/v5 v5.0.3
+github.com/godbus/dbus/v5
 # github.com/golang/protobuf v1.4.2
 github.com/golang/protobuf/proto
 # github.com/nirasan/go-oauth-pkce-code-verifier v0.0.0-20170819232839-0fbfe93532da
 ## explicit
 github.com/nirasan/go-oauth-pkce-code-verifier
+# github.com/zalando/go-keyring v0.1.1
+## explicit
+github.com/zalando/go-keyring
+github.com/zalando/go-keyring/secret_service
 # golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
 golang.org/x/crypto/ed25519
 golang.org/x/crypto/ed25519/internal/edwards25519
