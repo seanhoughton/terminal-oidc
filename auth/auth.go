@@ -37,6 +37,7 @@ type TerminalAuth struct {
 	keychainPrefix string
 	scopes         []string
 	extraFields    []string
+	successBody    string
 }
 
 type Option func(*TerminalAuth) error
@@ -116,6 +117,15 @@ func WithRefreshToken(token string) Option {
 	}
 }
 
+// WithSuccessBody sets the content of the web response to users when
+// a successful authentication flow has completed.
+func WithSuccessBody(body string) Option {
+	return func(ta *TerminalAuth) error {
+		ta.successBody = body
+		return nil
+	}
+}
+
 // NewTerminalAuth returns an initialized TerminalAuth instance
 func NewTerminalAuth(ctx context.Context, issuer string, clientID string, options ...Option) (*TerminalAuth, error) {
 	// default configuration
@@ -128,6 +138,7 @@ func NewTerminalAuth(ctx context.Context, issuer string, clientID string, option
 	WithScopes(oidc.ScopeOpenID, "profile", "email")(ta)
 	WithStdoutPrompt()(ta)
 	WithKeychainPrefix("terminaloidc")(ta)
+	WithSuccessBody(defaultSuccessBody)(ta)
 
 	// options
 	for _, opt := range options {
@@ -205,7 +216,7 @@ func (ta *TerminalAuth) IDToken(ctx context.Context) (*oidc.IDToken, error) {
 	}
 }
 
-const responseText = `
+const defaultSuccessBody = `
 <html>
 
 <head>
@@ -251,7 +262,7 @@ func (ta *TerminalAuth) login(ctx context.Context) (*oauth2.Token, error) {
 			_, _ = w.Write([]byte(fmt.Sprintf("Error: %v", err)))
 		} else {
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(responseText))
+			_, _ = w.Write([]byte(ta.successBody))
 		}
 
 		go func() {
