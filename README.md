@@ -14,6 +14,8 @@ go get github.com/seanhoughton/terminal-oidc
 
 ## Usage
 
+Clients that need to send access tokens should use the provided client which will automatically add the `Authorization: Bearer xxx` header to all request and refresh the token when needed.
+
 **important:** production code should handle errors
 
 ```go
@@ -26,6 +28,25 @@ func main() {
     ta, _ := auth.NewTerminalAuth(ctx, issuer, clientID, auth.WithStdoutPrompt())
     client, _ := ta.Client(context.TODO())
     resp, _ := client.Get("https://authenticated.com/path")
+}
+```
+
+Clients that need to send ID tokens should use the token source and 
+
+
+```go
+
+import auth "github.com/seanhoughton/terminal-oidc"
+
+func main() {
+    issuer := "https://dev-123456.oktapreview.com/"
+    clientID := "1234abcd"
+    ta, _ := auth.NewTerminalAuth(ctx, issuer, clientID, auth.WithStdoutPrompt())
+    tokens := ta.TokenSource(context.TODO())
+    req, _ := http.NewRequest(http.MethodGet, "https://authenticated.com/path", nil)
+    token, _ := tokens.Token()
+    req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token.Extra("id_token")))
+    resp, _ := http.DefaultClient.Do(req)
 }
 ```
 
