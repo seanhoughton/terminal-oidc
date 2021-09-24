@@ -39,53 +39,59 @@ type TerminalAuth struct {
 	extraFields    []string
 }
 
-type Option func(*TerminalAuth)
+type Option func(*TerminalAuth) error
 
 // WithLogger installs a custom logger instance
 func WithLogger(logger *log.Logger) Option {
-	return func(ta *TerminalAuth) {
+	return func(ta *TerminalAuth) error {
 		ta.logger = logger
+		return nil
 	}
 }
 
 // WithRedirectPort customizes the local OAuth redirect port (default: 11123)
 func WithRedirectPort(port int16) Option {
-	return func(ta *TerminalAuth) {
+	return func(ta *TerminalAuth) error {
 		ta.port = port
+		return nil
 	}
 }
 
 // WithClientSecret adds a client secret to the authorization request
 // Note that this is required by some providers but not all.
 func WithClientSecret(secret string) Option {
-	return func(ta *TerminalAuth) {
+	return func(ta *TerminalAuth) error {
 		ta.clientSecret = secret
+		return nil
 	}
 }
 
 // WithStdoutPrompt prints the authorization URL to stdout
 func WithStdoutPrompt() Option {
-	return func(ta *TerminalAuth) {
+	return func(ta *TerminalAuth) error {
 		ta.prompt = func(authURL string) error {
 			fmt.Printf("Visit the URL for the auth dialog: %v\n", authURL)
 			return nil
 		}
+		return nil
 	}
 }
 
 // WithBrowserPrompt opens the authorization URL in the default browser
 func WithBrowserPrompt() Option {
-	return func(ta *TerminalAuth) {
+	return func(ta *TerminalAuth) error {
 		ta.prompt = func(authURL string) error {
 			return browser.OpenURL(authURL)
 		}
+		return nil
 	}
 }
 
 // WithKeychainPrefix sets a prefix for naming the stored secret
 func WithKeychainPrefix(prefix string) Option {
-	return func(ta *TerminalAuth) {
+	return func(ta *TerminalAuth) error {
 		ta.keychainPrefix = prefix
+		return nil
 	}
 }
 
@@ -93,8 +99,20 @@ func WithKeychainPrefix(prefix string) Option {
 // Note that some providers (e.g. Okta) require the "offline_access" scope to get
 // a refresh token while Google will fail if the "offline_access" scope is requested
 func WithScopes(scopes ...string) Option {
-	return func(ta *TerminalAuth) {
+	return func(ta *TerminalAuth) error {
 		ta.scopes = append(ta.scopes, scopes...)
+		return nil
+	}
+}
+
+// WithRefreshToken will install an initial refresh token to be used
+// and should be used in a provisioned setting where refresh tokens
+// are known
+func WithRefreshToken(token string) Option {
+	return func(ta *TerminalAuth) error {
+		return ta.setToken(&oauth2.Token{
+			RefreshToken: token,
+		})
 	}
 }
 

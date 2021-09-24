@@ -50,6 +50,9 @@ func main() {
 }
 ```
 
+Clients with known refresh tokens can initialize the client using the `WithRefreshToken("xxxxx")` option.
+
+
 ## Issuer Notes
 
 | Issuer |                                                                                                             |
