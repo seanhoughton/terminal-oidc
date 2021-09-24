@@ -205,6 +205,22 @@ func (ta *TerminalAuth) IDToken(ctx context.Context) (*oidc.IDToken, error) {
 	}
 }
 
+const responseText = `
+<html>
+
+<head>
+    <title>OAuth Request Successful</title>
+</head>
+
+<body>
+    <p style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"; font-size: 22px; color: #333; width: 400px; margin: 0 auto; text-align: center; line-height: 1.7; padding: 20px;'>
+        <strong style='font-size: 28px; color: #000;'>Success</strong><br />This browser window can now be closed
+	</p>
+</body>
+
+</html>
+`
+
 func (ta *TerminalAuth) login(ctx context.Context) (*oauth2.Token, error) {
 	ta.logger.Println("Starting new login")
 	// Redirect user to consent page to ask for permission
@@ -232,10 +248,10 @@ func (ta *TerminalAuth) login(ctx context.Context) (*oauth2.Token, error) {
 		tokenErr = err
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf("Error: %v", err)))
+			_, _ = w.Write([]byte(fmt.Sprintf("Error: %v", err)))
 		} else {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("Access has been granted, you can now close this browser page."))
+			_, _ = w.Write([]byte(responseText))
 		}
 
 		go func() {
