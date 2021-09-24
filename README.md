@@ -50,7 +50,16 @@ func main() {
 }
 ```
 
-Clients with known refresh tokens can initialize the client using the `WithRefreshToken("xxxxx")` option.
+### Pre-configured refresh tokens
+
+Clients that don't want to use the built-in flow handling a pre-configured refresh token can be provided using the `WithRefreshToken("xxx")` option. This may be convenient for situations where the refresh
+token is used by multiple clients and distributed with a provisioning system like Puppet or a shared secrets tool like Vault.
+
+The [step](https://github.com/smallstep/cli) tool can be used to easily get a refresh token for distribution.
+
+```
+step oauth --client-id=xxxxxx --client-secret="" --provider https://dev-xxxxxx.oktapreview.com/.well-known/openid-configuration --listen :19978 --oidc --scope "openid email offline_access groups" | jq --raw-output ".id_token"
+```
 
 
 ## Issuer Notes

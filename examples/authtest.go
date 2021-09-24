@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -22,17 +23,30 @@ var clientSecret = os.Getenv("AUTH_CLIENT_SECRET")
 
 func main() {
 
+	var refreshToken = flag.String("r", "", "Pre-configured refresh token")
+	var scopes = flag.String("s", "", "Additional scopes to request")
+	flag.Parse()
+
 	ctx := context.Background()
 
 	logger := log.New(os.Stdout, "[AUTH] ", log.LstdFlags)
 
+	options := []auth.Option{
+		auth.WithClientSecret(clientSecret),
+		auth.WithLogger(logger),
+		auth.WithScopes(oidc.ScopeOfflineAccess),
+		auth.WithRedirectPort(19978),
+	}
+	if refreshToken != nil {
+		options = append(options, auth.WithRefreshToken(*refreshToken))
+	}
+	if scopes != nil {
+		options = append(options, auth.WithScopes(strings.Split(*scopes, ",")...))
+	}
 	ta, err := auth.NewTerminalAuth(ctx,
 		issuer,
 		clientID,
-		auth.WithClientSecret(clientSecret),
-		auth.WithLogger(logger),
-		auth.WithScopes(append(os.Args[1:], oidc.ScopeOfflineAccess)...),
-		auth.WithRedirectPort(19978))
+		options...)
 	if err != nil {
 		log.Fatal(err)
 	}

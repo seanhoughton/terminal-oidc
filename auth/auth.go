@@ -160,6 +160,7 @@ func NewTerminalAuth(ctx context.Context, issuer string, clientID string, option
 		return nil, err
 	} else if ta.lastGoodToken.Valid() {
 		// we have a valid token that's not timed out
+		ta.logger.Println("Loaded token is valid and has not expired")
 		return ta, nil
 	} else if newToken, err := ta.TokenSource(ctx).Token(); err != nil {
 		// failed to refresh the old token
