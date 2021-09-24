@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/sha1"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -137,12 +138,12 @@ func NewTerminalAuth(ctx context.Context, issuer string, clientID string, option
 	ta.tokenVerifier = provider.Verifier(oidcConfig)
 
 	// restore the saved token if it exists
-	if err := ta.loadToken(); err != nil && err != ErrNoSavedToken {
+	if err := ta.loadToken(); err != nil && err != ErrNoSavedToken && err != ErrTokenScopesChanged {
 		return nil, err
 	} else if ta.lastGoodToken.Valid() {
 		// we have a valid token that's not timed out
 		return ta, nil
-	} else if newToken, err := ta.tokenSource(ctx).Token(); err != nil {
+	} else if newToken, err := ta.TokenSource(ctx).Token(); err != nil {
 		// failed to refresh the old token
 		ta.logger.Printf("Stored token is not usable: %v\n", err)
 		return ta, nil
@@ -154,7 +155,7 @@ func NewTerminalAuth(ctx context.Context, issuer string, clientID string, option
 }
 
 func (ta *TerminalAuth) Token(ctx context.Context) (*oauth2.Token, error) {
-	return ta.tokenSource(ctx).Token()
+	return ta.TokenSource(ctx).Token()
 }
 
 // Valid returns "true" if a non-expired token has been loaded
@@ -207,27 +208,47 @@ func (ta *TerminalAuth) login(ctx context.Context) (*oauth2.Token, error) {
 		Addr: fmt.Sprintf("localhost:%d", ta.port),
 	}
 
-	cleanup := func(err error) {
+	var tokenErr error
+	cleanup := func(w http.ResponseWriter, err error) {
+		tokenErr = err
 		if err != nil {
-			ta.logger.Println(err)
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(fmt.Sprintf("Error: %v", err)))
+		} else {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("Access has been granted, you can now close this browser page."))
 		}
-		if err := handleRedirect.Shutdown(ctx); err != nil {
-			ta.logger.Println(err)
-		}
+
+		go func() {
+			// do this asynchronously so the response can be written
+			if err := handleRedirect.Shutdown(ctx); err != nil {
+				ta.logger.Println(err)
+			}
+		}()
 	}
 
 	var tok *oauth2.Token
 	handleRedirect.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ta.logger.Println("Received auth callback")
+
+		if r.URL.Query().Get("error") != "" {
+			cleanup(w, fmt.Errorf("%s", r.URL.Query().Get("error_description")))
+			return
+		}
+
 		if stateCheck := r.URL.Query().Get("state"); stateCheck != state {
-			cleanup(fmt.Errorf("state check mismatch (expected %s but got %s)", state, stateCheck))
+			cleanup(w, fmt.Errorf("state check mismatch (expected %s but got %s)", state, stateCheck))
 			return
 		}
 
 		authCode := r.URL.Query().Get("code")
+		if authCode == "" {
+			cleanup(w, fmt.Errorf("missing authorization code"))
+			return
+		}
 		oauth2Token, err := ta.authConfig.Exchange(ctx, authCode, oauth2.SetAuthURLParam("code_verifier", codeVerifier.String()))
 		if err != nil {
-			cleanup(err)
+			cleanup(w, err)
 			return
 		}
 
@@ -238,20 +259,20 @@ func (ta *TerminalAuth) login(ctx context.Context) (*oauth2.Token, error) {
 		// Extract the ID Token from OAuth2 token.
 		rawIDToken, ok := oauth2Token.Extra("id_token").(string)
 		if !ok {
-			cleanup(err)
+			cleanup(w, err)
 			return
 		}
 
 		// Parse and verify ID Token payload.
 		_, err = ta.tokenVerifier.Verify(ctx, rawIDToken)
 		if err != nil {
-			cleanup(err)
+			cleanup(w, err)
 			return
 		}
 
 		ta.logger.Println("Received valid token")
 		tok = oauth2Token
-		cleanup(nil)
+		cleanup(w, nil)
 
 	})
 
@@ -260,10 +281,13 @@ func (ta *TerminalAuth) login(ctx context.Context) (*oauth2.Token, error) {
 		return nil, err
 	}
 
+	if tokenErr != nil {
+		return nil, tokenErr
+	}
 	return tok, nil
 }
 
-func (ta *TerminalAuth) tokenSource(ctx context.Context) oauth2.TokenSource {
+func (ta *TerminalAuth) TokenSource(ctx context.Context) oauth2.TokenSource {
 	return &NotifyRefreshTokenSource{
 		new: ta.authConfig.TokenSource(ctx, ta.lastGoodToken),
 		t:   ta.lastGoodToken,
@@ -274,19 +298,38 @@ func (ta *TerminalAuth) tokenSource(ctx context.Context) oauth2.TokenSource {
 // Client returns an http client which uses the token and will automatically refresh
 // it when the token expires
 func (ta *TerminalAuth) Client(ctx context.Context) *http.Client {
-	return oauth2.NewClient(ctx, ta.tokenSource(ctx))
+	return oauth2.NewClient(ctx, ta.TokenSource(ctx))
 }
 
 var ErrNoSavedToken = errors.New("no saved token")
 var ErrNoLoadedToken = errors.New("no loaded token")
+var ErrTokenScopesChanged = errors.New("requested scopes have changed")
 
 func (ta *TerminalAuth) keychainName() string {
 	return fmt.Sprintf("%s-%s", ta.keychainPrefix, ta.Issuer)
 }
 
+func (ta *TerminalAuth) scopeHash() string {
+	h := sha1.New()
+	for _, s := range ta.scopes {
+		h.Write([]byte(s))
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
 func (ta *TerminalAuth) loadToken() error {
+	// check current scopes
+
 	tok := oauth2.Token{}
-	if data, err := keyring.Get(ta.keychainName(), "token"); err != nil {
+	if data, err := keyring.Get(ta.keychainName(), "scopes"); err != nil {
+		if err == keyring.ErrNotFound {
+			return ErrNoSavedToken
+		} else {
+			return err
+		}
+	} else if data != ta.scopeHash() {
+		return ErrTokenScopesChanged
+	} else if data, err := keyring.Get(ta.keychainName(), "token"); err != nil {
 		if err == keyring.ErrNotFound {
 			return ErrNoSavedToken
 		} else {
@@ -316,7 +359,9 @@ func (ta *TerminalAuth) loadToken() error {
 func (ta *TerminalAuth) setToken(tok *oauth2.Token) error {
 	ta.lastGoodToken = tok
 	b := strings.Builder{}
-	if err := json.NewEncoder(&b).Encode(tok); err != nil {
+	if err := keyring.Set(ta.keychainName(), "scopes", ta.scopeHash()); err != nil {
+		return err
+	} else if err := json.NewEncoder(&b).Encode(tok); err != nil {
 		return err
 	} else if err := keyring.Set(ta.keychainName(), "token", b.String()); err != nil {
 		return err

@@ -5,12 +5,22 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Authtest",
+            "name": "OKTA Base",
             "type": "go",
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/examples/authtest.go",
-            "args": []
+            "args": [],
+            "envFile": "${workspaceFolder}/okta-base-authorization.env"
+        },
+        {
+            "name": "OKTA Custom",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/examples/authtest.go",
+            "args": [],
+            "envFile": "${workspaceFolder}/okta-custom-authorization.env"
         }
     ]
 }
