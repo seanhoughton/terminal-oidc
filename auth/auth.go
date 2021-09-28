@@ -36,7 +36,6 @@ type TerminalAuth struct {
 	prompt         promptFunc
 	keychainPrefix string
 	scopes         []string
-	extraFields    []string
 	successBody    string
 }
 
@@ -108,12 +107,29 @@ func WithScopes(scopes ...string) Option {
 
 // WithRefreshToken will install an initial refresh token to be used
 // and should be used in a provisioned setting where refresh tokens
-// are known
-func WithRefreshToken(token string) Option {
+// are known.
+// NOTE: this assumes the scopes have not changed and does
+// check the saved scope hash for invalidation. Use at your own risk.
+func WithRefreshToken(refreshToken string) Option {
 	return func(ta *TerminalAuth) error {
-		return ta.setToken(&oauth2.Token{
-			RefreshToken: token,
-		})
+		tok := &oauth2.Token{}
+		if data, err := keyring.Get(ta.keychainName(), "token"); err != nil && err != keyring.ErrNotFound {
+			return err
+		} else if err == nil {
+			// an existing token was saved, we'll load it and replace the refresh_token value
+			if err := json.NewDecoder(strings.NewReader(data)).Decode(&tok); err != nil {
+				return err
+			}
+		}
+		tok.RefreshToken = refreshToken
+		b := strings.Builder{}
+		if err := json.NewEncoder(&b).Encode(tok); err != nil {
+			return err
+		} else if err := keyring.Set(ta.keychainName(), "token", b.String()); err != nil {
+			return err
+		} else {
+			return nil
+		}
 	}
 }
 
@@ -169,9 +185,10 @@ func NewTerminalAuth(ctx context.Context, issuer string, clientID string, option
 	// restore the saved token if it exists
 	if err := ta.loadToken(); err != nil && err != ErrNoSavedToken && err != ErrTokenScopesChanged {
 		return nil, err
-	} else if ta.lastGoodToken.Valid() {
+	} else if ta.HasValidToken() {
 		// we have a valid token that's not timed out
 		ta.logger.Println("Loaded token is valid and has not expired")
+		// override the loaded refresh token
 		return ta, nil
 	} else if newToken, err := ta.TokenSource(ctx).Token(); err != nil {
 		// failed to refresh the old token
@@ -188,8 +205,8 @@ func (ta *TerminalAuth) Token(ctx context.Context) (*oauth2.Token, error) {
 	return ta.TokenSource(ctx).Token()
 }
 
-// Valid returns "true" if a non-expired token has been loaded
-func (ta *TerminalAuth) Valid() bool {
+// HasValidToken returns "true" if a non-expired token has been loaded
+func (ta *TerminalAuth) HasValidToken() bool {
 	return ta.lastGoodToken != nil && ta.lastGoodToken.Valid()
 }
 
@@ -299,7 +316,7 @@ func (ta *TerminalAuth) login(ctx context.Context) (*oauth2.Token, error) {
 		}
 
 		if oauth2Token.RefreshToken == "" {
-			log.Println("Warning: auth response contains no refresh toke")
+			log.Println("Warning: auth response contains no refresh token")
 		}
 
 		// Extract the ID Token from OAuth2 token.
@@ -341,10 +358,16 @@ func (ta *TerminalAuth) TokenSource(ctx context.Context) oauth2.TokenSource {
 	}
 }
 
-// Client returns an http client which uses the token and will automatically refresh
+// AccessClient returns an http client which uses the access token and will automatically refresh
 // it when the token expires
-func (ta *TerminalAuth) Client(ctx context.Context) *http.Client {
+func (ta *TerminalAuth) AccessClient(ctx context.Context) *http.Client {
 	return oauth2.NewClient(ctx, ta.TokenSource(ctx))
+}
+
+// IDClient returns an http client which uses the ID token and will automatically refresh
+// it when the token expires
+func (ta *TerminalAuth) IDClient(ctx context.Context) *http.Client {
+	return newIDClient(ctx, ta.TokenSource(ctx))
 }
 
 var ErrNoSavedToken = errors.New("no saved token")

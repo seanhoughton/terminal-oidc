@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"os"
 	"strings"
@@ -37,10 +36,10 @@ func main() {
 		auth.WithScopes(oidc.ScopeOfflineAccess),
 		auth.WithRedirectPort(19978),
 	}
-	if refreshToken != nil {
+	if *refreshToken != "" {
 		options = append(options, auth.WithRefreshToken(*refreshToken))
 	}
-	if scopes != nil {
+	if *scopes != "" {
 		options = append(options, auth.WithScopes(strings.Split(*scopes, ",")...))
 	}
 	ta, err := auth.NewTerminalAuth(ctx,
@@ -51,7 +50,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if !ta.Valid() {
+	if !ta.HasValidToken() {
 		if err := ta.Login(ctx); err != nil {
 			log.Fatalf("Failed to log in: %v", err)
 		}
@@ -78,24 +77,17 @@ func main() {
 		log.Printf("id issuer: %s\n", idToken.Issuer)
 		log.Printf("id info:   %v\n", claims)
 
-		//introspect(token)
-
-		if err := localhost(ctx, ta.TokenSource(ctx)); err != nil {
+		if err := localhost(ctx, ta.IDClient(ctx)); err != nil {
 			log.Fatal(err)
 		}
 	}
 }
 
-func localhost(ctx context.Context, tokens oauth2.TokenSource) error {
+func localhost(ctx context.Context, client *http.Client) error {
 	if req, err := http.NewRequest(http.MethodGet, "http://localhost:8080/test", nil); err != nil {
 		return err
-	} else if token, err := tokens.Token(); err != nil {
-		return err
 	} else {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token.Extra("id_token")))
-		reqDump, _ := httputil.DumpRequest(req, false)
-		fmt.Println(string(reqDump))
-		if resp, err := http.DefaultClient.Do(req); err != nil {
+		if resp, err := client.Do(req); err != nil {
 			return err
 		} else if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("Error: %s", resp.Status)
