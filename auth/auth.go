@@ -31,6 +31,13 @@ const (
 	idTokenKey          = "id-token"
 )
 
+var (
+	ErrNoSavedToken       = errors.New("no saved token")
+	ErrNoLoadedToken      = errors.New("no loaded token")
+	ErrTokenScopesChanged = errors.New("requested scopes have changed")
+	ErrNoOIDCConfig       = errors.New("oidc config was not provided or cached")
+)
+
 type promptFunc func(authURL string) error
 
 type TerminalAuth struct {
@@ -196,12 +203,8 @@ func NewTerminalAuth(ctx context.Context, serviceIdentifier string, options ...O
 		return nil, fmt.Errorf("failed to load cached oidc settings: %v", err)
 	}
 
-	if ta.issuerURL == "" {
-		return nil, fmt.Errorf("issuer url was not provided and not previously cached")
-	}
-
-	if ta.clientID == "" {
-		return nil, fmt.Errorf("client id was not provided and not previously cached")
+	if ta.issuerURL == "" || ta.clientID == "" {
+		return nil, ErrNoOIDCConfig
 	}
 
 	provider, err := oidc.NewProvider(ctx, ta.issuerURL)
@@ -412,10 +415,6 @@ func (ta *TerminalAuth) AccessClient(ctx context.Context) *http.Client {
 func (ta *TerminalAuth) IDClient(ctx context.Context) *http.Client {
 	return newIDClient(ctx, ta.TokenSource(ctx))
 }
-
-var ErrNoSavedToken = errors.New("no saved token")
-var ErrNoLoadedToken = errors.New("no loaded token")
-var ErrTokenScopesChanged = errors.New("requested scopes have changed")
 
 func (ta *TerminalAuth) keychainName() string {
 	return fmt.Sprintf("%s-%s", ta.keychainPrefix, ta.serviceIdentifier)
