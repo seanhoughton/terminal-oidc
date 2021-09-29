@@ -19,27 +19,57 @@ import (
 	"golang.org/x/oauth2"
 )
 
-const defaultPort = 11123
+const (
+	defaultPort = 11123
+
+	// key names for saving in the keyring
+	oidcIssuerURLKey    = "oidc-issuer-url"
+	oidcClientIDKey     = "oidc-client-id"
+	oidcClientSecretKey = "oidc-client-secret"
+	scopesKey           = "scopes"
+	tokenKey            = "token"
+	idTokenKey          = "id-token"
+)
 
 type promptFunc func(authURL string) error
 
 type TerminalAuth struct {
-	ClientID string
-	Issuer   string
-
-	tokenVerifier  *oidc.IDTokenVerifier
-	authConfig     *oauth2.Config
-	lastGoodToken  *oauth2.Token
-	port           int16
-	logger         *log.Logger
-	clientSecret   string
-	prompt         promptFunc
-	keychainPrefix string
-	scopes         []string
-	successBody    string
+	clientID          string
+	issuerURL         string
+	serviceIdentifier string
+	tokenVerifier     *oidc.IDTokenVerifier
+	authConfig        *oauth2.Config
+	lastGoodToken     *oauth2.Token
+	port              int16
+	logger            *log.Logger
+	clientSecret      string
+	prompt            promptFunc
+	keychainPrefix    string
+	scopes            []string
+	successBody       string
 }
 
 type Option func(*TerminalAuth) error
+
+// WithClientID sets the OIDC client_id
+// If this is not provided the currently saved
+// client ID from a previous login will be used
+func WithClientID(clientID string) Option {
+	return func(ta *TerminalAuth) error {
+		ta.clientID = clientID
+		return keyring.Set(ta.keychainName(), oidcClientIDKey, clientID)
+	}
+}
+
+// WithIssuer sets the OIDC issuer base URL
+// If this is not provided the currently saved
+// issuer from a previous login will be used
+func WithIssuerURL(issuerURL string) Option {
+	return func(ta *TerminalAuth) error {
+		ta.issuerURL = issuerURL
+		return keyring.Set(ta.keychainName(), oidcIssuerURLKey, issuerURL)
+	}
+}
 
 // WithLogger installs a custom logger instance
 func WithLogger(logger *log.Logger) Option {
@@ -58,11 +88,11 @@ func WithRedirectPort(port int16) Option {
 }
 
 // WithClientSecret adds a client secret to the authorization request
-// Note that this is required by some providers but not all.
+// Note that this is required by some providers (e.g. Google) but not all.
 func WithClientSecret(secret string) Option {
 	return func(ta *TerminalAuth) error {
 		ta.clientSecret = secret
-		return nil
+		return keyring.Set(ta.keychainName(), oidcClientSecretKey, secret)
 	}
 }
 
@@ -143,11 +173,11 @@ func WithSuccessBody(body string) Option {
 }
 
 // NewTerminalAuth returns an initialized TerminalAuth instance
-func NewTerminalAuth(ctx context.Context, issuer string, clientID string, options ...Option) (*TerminalAuth, error) {
+// serviceIdentifier is an key for caching authentication values
+func NewTerminalAuth(ctx context.Context, serviceIdentifier string, options ...Option) (*TerminalAuth, error) {
 	// default configuration
 	ta := &TerminalAuth{
-		ClientID: clientID,
-		Issuer:   issuer,
+		serviceIdentifier: serviceIdentifier,
 	}
 	WithLogger(log.Default())(ta)
 	WithRedirectPort(defaultPort)(ta)
@@ -161,7 +191,20 @@ func NewTerminalAuth(ctx context.Context, issuer string, clientID string, option
 		opt(ta)
 	}
 
-	provider, err := oidc.NewProvider(ctx, issuer)
+	// load any unset values from the cache
+	if err := ta.loadOIDC(); err != nil {
+		return nil, fmt.Errorf("failed to load cached oidc settings: %v", err)
+	}
+
+	if ta.issuerURL == "" {
+		return nil, fmt.Errorf("issuer url was not provided and not previously cached")
+	}
+
+	if ta.clientID == "" {
+		return nil, fmt.Errorf("client id was not provided and not previously cached")
+	}
+
+	provider, err := oidc.NewProvider(ctx, ta.issuerURL)
 	if err != nil {
 		return nil, err
 	}
@@ -169,11 +212,11 @@ func NewTerminalAuth(ctx context.Context, issuer string, clientID string, option
 	ta.logger.Println("Using authorization endpoint ", provider.Endpoint())
 
 	oidcConfig := &oidc.Config{
-		ClientID: clientID,
+		ClientID: ta.clientID,
 	}
 
 	ta.authConfig = &oauth2.Config{
-		ClientID:     clientID,
+		ClientID:     ta.clientID,
 		ClientSecret: ta.clientSecret,
 		Endpoint:     provider.Endpoint(),
 		Scopes:       ta.scopes,
@@ -375,7 +418,7 @@ var ErrNoLoadedToken = errors.New("no loaded token")
 var ErrTokenScopesChanged = errors.New("requested scopes have changed")
 
 func (ta *TerminalAuth) keychainName() string {
-	return fmt.Sprintf("%s-%s", ta.keychainPrefix, ta.Issuer)
+	return fmt.Sprintf("%s-%s", ta.keychainPrefix, ta.serviceIdentifier)
 }
 
 func (ta *TerminalAuth) scopeHash() string {
@@ -386,11 +429,41 @@ func (ta *TerminalAuth) scopeHash() string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-func (ta *TerminalAuth) loadToken() error {
-	// check current scopes
+// loadOIDC loads stored OIDC settings if they aren't currently set
+func (ta *TerminalAuth) loadOIDC() error {
+	if ta.issuerURL == "" {
+		if data, err := keyring.Get(ta.keychainName(), oidcIssuerURLKey); err != nil && err != keyring.ErrNotFound {
+			return fmt.Errorf("could not load %s: %v", oidcIssuerURLKey, err)
+		} else if err == nil {
+			ta.logger.Printf("Loading cached %s: %s\n", oidcIssuerURLKey, data)
+			ta.issuerURL = data
+		}
+	}
 
+	if ta.clientID == "" {
+		if data, err := keyring.Get(ta.keychainName(), oidcClientIDKey); err != nil && err != keyring.ErrNotFound {
+			return fmt.Errorf("could not load %s: %v", oidcClientIDKey, err)
+		} else if err == nil {
+			ta.logger.Printf("Loading cached %s: %s\n", oidcClientIDKey, data)
+			ta.clientID = data
+		}
+	}
+
+	if ta.clientSecret == "" {
+		if data, err := keyring.Get(ta.keychainName(), oidcClientSecretKey); err != nil && err != keyring.ErrNotFound {
+			return fmt.Errorf("could not load %s: %v", oidcClientSecretKey, err)
+		} else if err == nil {
+			ta.logger.Printf("Loading cached %s: <redacted>\n", oidcClientSecretKey)
+			ta.clientSecret = data
+		}
+	}
+	return nil
+}
+
+// loadToken loads cached token data
+func (ta *TerminalAuth) loadToken() error {
 	tok := oauth2.Token{}
-	if data, err := keyring.Get(ta.keychainName(), "scopes"); err != nil {
+	if data, err := keyring.Get(ta.keychainName(), scopesKey); err != nil {
 		if err == keyring.ErrNotFound {
 			return ErrNoSavedToken
 		} else {
@@ -398,7 +471,7 @@ func (ta *TerminalAuth) loadToken() error {
 		}
 	} else if data != ta.scopeHash() {
 		return ErrTokenScopesChanged
-	} else if data, err := keyring.Get(ta.keychainName(), "token"); err != nil {
+	} else if data, err := keyring.Get(ta.keychainName(), tokenKey); err != nil {
 		if err == keyring.ErrNotFound {
 			return ErrNoSavedToken
 		} else {
@@ -406,7 +479,7 @@ func (ta *TerminalAuth) loadToken() error {
 		}
 	} else if err := json.NewDecoder(strings.NewReader(data)).Decode(&tok); err != nil {
 		return err
-	} else if idToken, err := keyring.Get(ta.keychainName(), "id-token"); err != nil {
+	} else if idToken, err := keyring.Get(ta.keychainName(), idTokenKey); err != nil {
 		if err == keyring.ErrNotFound {
 			return ErrNoSavedToken
 		} else {
@@ -425,18 +498,25 @@ func (ta *TerminalAuth) loadToken() error {
 	}
 }
 
+// setToken caches all configuration options
 func (ta *TerminalAuth) setToken(tok *oauth2.Token) error {
 	ta.lastGoodToken = tok
 	b := strings.Builder{}
-	if err := keyring.Set(ta.keychainName(), "scopes", ta.scopeHash()); err != nil {
+	if err := keyring.Set(ta.keychainName(), oidcIssuerURLKey, ta.issuerURL); err != nil {
+		return err
+	} else if err := keyring.Set(ta.keychainName(), oidcClientIDKey, ta.clientID); err != nil {
+		return err
+	} else if err := keyring.Set(ta.keychainName(), oidcClientSecretKey, ta.clientSecret); err != nil {
+		return err
+	} else if err := keyring.Set(ta.keychainName(), scopesKey, ta.scopeHash()); err != nil {
 		return err
 	} else if err := json.NewEncoder(&b).Encode(tok); err != nil {
 		return err
-	} else if err := keyring.Set(ta.keychainName(), "token", b.String()); err != nil {
+	} else if err := keyring.Set(ta.keychainName(), tokenKey, b.String()); err != nil {
 		return err
 	} else if idToken, ok := tok.Extra("id_token").(string); !ok {
 		return fmt.Errorf("bad id token")
-	} else if err := keyring.Set(ta.keychainName(), "id-token", idToken); err != nil {
+	} else if err := keyring.Set(ta.keychainName(), idTokenKey, idToken); err != nil {
 		return err
 	} else {
 		ta.logger.Printf("Token updated and saved as %s (field: token)\n", ta.keychainName())

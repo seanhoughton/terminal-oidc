@@ -7,8 +7,8 @@ The default scope settings will request `email` and `profile` scopes.
 
 ## Installation 
 
-```
-go get github.com/seanhoughton/terminal-oidc
+```sh
+> go get github.com/seanhoughton/terminal-oidc
 ```
 
 
@@ -49,6 +49,25 @@ func main() {
     resp, _ := http.DefaultClient.Do(req)
 }
 ```
+
+### Cached values and integration patterns
+
+The module will store both the configuration and token locally for re-use. Applications integrating the terminal-auth module should break up integrations into a login step and a cached use step.
+
+The login step should provide all required configuration options. This login step will cache the provided values for future use. For example:
+
+```golang
+scopes = []string{"myscope"}
+
+// the initial use must provide OIDC configuration
+
+ta1, _ := auth.NewTerminalAuth(ctx, auth.WithIssuerURL("https://xxxx"), auth.WithClientID("xxxxx"), auth.WithScopes(scopes))
+
+// subsequent usage can omit OIDC configuration and used cached values
+
+ta2, _ := auth.NewTerminalAuth(ctx, auth.WithScopes(scopes)))
+```
+
 
 ### Pre-configured refresh tokens
 

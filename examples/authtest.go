@@ -31,6 +31,8 @@ func main() {
 	logger := log.New(os.Stdout, "[AUTH] ", log.LstdFlags)
 
 	options := []auth.Option{
+		auth.WithClientID(clientID),
+		auth.WithIssuerURL(issuer),
 		auth.WithClientSecret(clientSecret),
 		auth.WithLogger(logger),
 		auth.WithScopes(oidc.ScopeOfflineAccess),
@@ -42,17 +44,17 @@ func main() {
 	if *scopes != "" {
 		options = append(options, auth.WithScopes(strings.Split(*scopes, ",")...))
 	}
+	const serviceIdentifier = "http://localhost:8080"
 	ta, err := auth.NewTerminalAuth(ctx,
-		issuer,
-		clientID,
+		serviceIdentifier,
 		options...)
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal(err)
 	}
 
 	if !ta.HasValidToken() {
 		if err := ta.Login(ctx); err != nil {
-			log.Fatalf("Failed to log in: %v", err)
+			logger.Fatalf("Failed to log in: %v", err)
 		}
 	}
 
@@ -65,25 +67,41 @@ func main() {
 	}
 
 	if token, err := ta.Token(ctx); err != nil {
-		log.Fatal(err)
+		logger.Fatal(err)
 	} else if idToken, err := ta.IDToken(ctx); err != nil {
-		log.Fatal(err)
+		logger.Fatal(err)
 	} else if err := idToken.Claims(&claims); err != nil {
-		log.Fatal(err)
+		logger.Fatal(err)
 	} else {
-		log.Printf("access:    %s\n", token.AccessToken)
-		log.Printf("refresh:   %s\n", token.RefreshToken)
-		log.Printf("id token:  %s\n", token.Extra("id_token"))
-		log.Printf("id issuer: %s\n", idToken.Issuer)
-		log.Printf("id info:   %v\n", claims)
+		logger.Println("----------------------------------------")
+		logger.Printf("access:    %s\n", token.AccessToken)
+		logger.Printf("refresh:   %s\n", token.RefreshToken)
+		logger.Printf("id token:  %s\n", token.Extra("id_token"))
+		logger.Printf("id issuer: %s\n", idToken.Issuer)
+		logger.Printf("id info:   %v\n", claims)
+		logger.Println("----------------------------------------")
 
-		if err := localhost(ctx, ta.IDClient(ctx)); err != nil {
+		if err := localhost(ctx, ta.IDClient(ctx), logger); err != nil {
 			log.Fatal(err)
+		}
+	}
+
+	// now create a new auth client and re-use cached values
+
+	if ta2, err := auth.NewTerminalAuth(ctx,
+		serviceIdentifier,
+		auth.WithLogger(logger),
+		auth.WithScopes(oidc.ScopeOfflineAccess),
+	); err != nil {
+		logger.Fatal(err)
+	} else {
+		if err := localhost(ctx, ta2.IDClient(ctx), logger); err != nil {
+			logger.Fatal(err)
 		}
 	}
 }
 
-func localhost(ctx context.Context, client *http.Client) error {
+func localhost(ctx context.Context, client *http.Client, logger *log.Logger) error {
 	if req, err := http.NewRequest(http.MethodGet, "http://localhost:8080/test", nil); err != nil {
 		return err
 	} else {
@@ -94,13 +112,15 @@ func localhost(ctx context.Context, client *http.Client) error {
 		} else if data, err := ioutil.ReadAll(resp.Body); err != nil {
 			return err
 		} else {
-			fmt.Printf("\n%s\n", string(data))
+			logger.Printf("------------ ( response ) --------------")
+			logger.Printf("\n%s\n", string(data))
+			logger.Printf("----------------------------------------")
 			return nil
 		}
 	}
 }
 
-func introspect(token *oauth2.Token) {
+func introspect(token *oauth2.Token, logger *log.Logger) {
 	// now test the access token using introspect endpoint
 	//client := ta.Client(ctx)
 	args := url.Values{
@@ -109,10 +129,10 @@ func introspect(token *oauth2.Token) {
 		//"client_id":       {clientID},
 	}
 	if resp, err := http.DefaultClient.Post(fmt.Sprintf("%s/v1/introspect?client_id=%s", issuer, clientID), "application/x-www-form-urlencoded", strings.NewReader(args.Encode())); err != nil {
-		log.Fatal(err)
+		logger.Fatal(err)
 	} else if body, err := ioutil.ReadAll(resp.Body); err != nil {
-		log.Fatal(err)
+		logger.Fatal(err)
 	} else {
-		fmt.Printf("%s\n", string(body))
+		logger.Printf("%s\n", string(body))
 	}
 }
