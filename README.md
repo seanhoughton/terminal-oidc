@@ -25,7 +25,7 @@ import auth "github.com/seanhoughton/terminal-oidc"
 func main() {
     issuer := "https://dev-123456.oktapreview.com/"
     clientID := "1234abcd"
-    ta, _ := auth.NewTerminalAuth(ctx, issuer, clientID, auth.WithStdoutPrompt())
+    ta, _ := auth.NewTerminalAuth(ctx, auth.WithIssuerURL(issuer), auth.WithClientID(clientID), auth.WithStdoutPrompt())
     client, _ := ta.Client(context.TODO())
     resp, _ := client.Get("https://authenticated.com/path")
 }
@@ -41,7 +41,7 @@ import auth "github.com/seanhoughton/terminal-oidc"
 func main() {
     issuer := "https://dev-123456.oktapreview.com/"
     clientID := "1234abcd"
-    ta, _ := auth.NewTerminalAuth(ctx, issuer, clientID, auth.WithStdoutPrompt())
+    ta, _ := auth.NewTerminalAuth(ctx, auth.WithIssuerURL(issuer), auth.WithClientID(clientID), auth.WithStdoutPrompt())
     tokens := ta.TokenSource(context.TODO())
     req, _ := http.NewRequest(http.MethodGet, "https://authenticated.com/path", nil)
     token, _ := tokens.Token()

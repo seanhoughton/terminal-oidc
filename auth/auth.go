@@ -413,7 +413,7 @@ func (ta *TerminalAuth) AccessClient(ctx context.Context) *http.Client {
 // IDClient returns an http client which uses the ID token and will automatically refresh
 // it when the token expires
 func (ta *TerminalAuth) IDClient(ctx context.Context) *http.Client {
-	return newIDClient(ctx, ta.TokenSource(ctx))
+	return NewIDClient(ctx, ta.TokenSource(ctx))
 }
 
 func (ta *TerminalAuth) keychainName() string {

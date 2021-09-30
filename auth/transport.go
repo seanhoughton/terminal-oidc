@@ -99,7 +99,7 @@ func cloneRequest(r *http.Request) *http.Request {
 	return r2
 }
 
-func newIDClient(ctx context.Context, src oauth2.TokenSource) *http.Client {
+func NewIDClient(ctx context.Context, src oauth2.TokenSource) *http.Client {
 	return &http.Client{
 		Transport: &Transport{
 			Base:   http.DefaultTransport,
