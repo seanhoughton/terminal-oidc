@@ -397,11 +397,7 @@ func (ta *TerminalAuth) login(ctx context.Context) (*oauth2.Token, error) {
 }
 
 func (ta *TerminalAuth) TokenSource(ctx context.Context) oauth2.TokenSource {
-	return &NotifyRefreshTokenSource{
-		new: ta.authConfig.TokenSource(ctx, ta.lastGoodToken),
-		t:   ta.lastGoodToken,
-		f:   ta.setToken,
-	}
+	return NotifyRefreshTokenSource(ta.lastGoodToken, ta.authConfig.TokenSource(ctx, ta.lastGoodToken), ta.setToken)
 }
 
 // AccessClient returns an http client which uses the access token and will automatically refresh
