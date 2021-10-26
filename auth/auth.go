@@ -9,6 +9,8 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,7 +22,7 @@ import (
 )
 
 const (
-	defaultPort = 11123
+	defaultRedirect = "http://localhost:8080/auth/callback"
 
 	// key names for saving in the keyring
 	oidcIssuerURLKey    = "oidc-issuer-url"
@@ -47,7 +49,9 @@ type TerminalAuth struct {
 	tokenVerifier     *oidc.IDTokenVerifier
 	authConfig        *oauth2.Config
 	lastGoodToken     *oauth2.Token
+	provider          *oidc.Provider
 	port              int16
+	redirectURL       string
 	logger            *log.Logger
 	clientSecret      string
 	prompt            promptFunc
@@ -86,10 +90,17 @@ func WithLogger(logger *log.Logger) Option {
 	}
 }
 
-// WithRedirectPort customizes the local OAuth redirect port (default: 11123)
-func WithRedirectPort(port int16) Option {
+// WithRedirect customizes the local OAuth redirect port (default: 11123)
+func WithRedirect(redirect string) Option {
 	return func(ta *TerminalAuth) error {
-		ta.port = port
+		if parsed, err := url.Parse(redirect); err != nil {
+			return err
+		} else if port, err := strconv.ParseInt(parsed.Port(), 10, 16); err != nil {
+			return err
+		} else {
+			ta.port = int16(port)
+			ta.redirectURL = redirect
+		}
 		return nil
 	}
 }
@@ -187,7 +198,7 @@ func NewTerminalAuth(ctx context.Context, serviceIdentifier string, options ...O
 		serviceIdentifier: serviceIdentifier,
 	}
 	WithLogger(log.Default())(ta)
-	WithRedirectPort(defaultPort)(ta)
+	WithRedirect(defaultRedirect)(ta)
 	WithScopes(oidc.ScopeOpenID, "profile", "email")(ta)
 	WithStdoutPrompt()(ta)
 	WithKeychainPrefix("terminaloidc")(ta)
@@ -207,12 +218,13 @@ func NewTerminalAuth(ctx context.Context, serviceIdentifier string, options ...O
 		return nil, ErrNoOIDCConfig
 	}
 
-	provider, err := oidc.NewProvider(ctx, ta.issuerURL)
-	if err != nil {
+	if provider, err := oidc.NewProvider(ctx, ta.issuerURL); err != nil {
 		return nil, err
+	} else {
+		ta.provider = provider
 	}
 
-	ta.logger.Println("Using authorization endpoint ", provider.Endpoint())
+	ta.logger.Println("Using authorization endpoint ", ta.provider.Endpoint())
 
 	oidcConfig := &oidc.Config{
 		ClientID: ta.clientID,
@@ -221,12 +233,12 @@ func NewTerminalAuth(ctx context.Context, serviceIdentifier string, options ...O
 	ta.authConfig = &oauth2.Config{
 		ClientID:     ta.clientID,
 		ClientSecret: ta.clientSecret,
-		Endpoint:     provider.Endpoint(),
+		Endpoint:     ta.provider.Endpoint(),
 		Scopes:       ta.scopes,
 		RedirectURL:  fmt.Sprintf("http://localhost:%d/auth/callback", ta.port),
 	}
 
-	ta.tokenVerifier = provider.Verifier(oidcConfig)
+	ta.tokenVerifier = ta.provider.Verifier(oidcConfig)
 
 	// restore the saved token if it exists
 	if err := ta.loadToken(); err != nil && err != ErrNoSavedToken && err != ErrTokenScopesChanged {
@@ -414,6 +426,10 @@ func (ta *TerminalAuth) IDClient(ctx context.Context) *http.Client {
 
 func (ta *TerminalAuth) keychainName() string {
 	return fmt.Sprintf("%s-%s", ta.keychainPrefix, ta.serviceIdentifier)
+}
+
+func (ta *TerminalAuth) UserInfo(ctx context.Context) (*oidc.UserInfo, error) {
+	return ta.provider.UserInfo(ctx, ta.TokenSource(ctx))
 }
 
 func (ta *TerminalAuth) scopeHash() string {
