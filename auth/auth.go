@@ -153,6 +153,15 @@ func WithScopes(scopes ...string) Option {
 	}
 }
 
+// WithNoPersistence disables the keyring saving to local storage
+// This option should be provided before any others
+func WithNoPersistence() Option {
+	return func(ta *TerminalAuth) error {
+		keyring.MockInit()
+		return nil
+	}
+}
+
 // WithRefreshToken will install an initial refresh token to be used
 // and should be used in a provisioned setting where refresh tokens
 // are known.
