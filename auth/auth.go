@@ -37,7 +37,7 @@ var (
 	ErrNoSavedToken       = errors.New("no saved token")
 	ErrNoLoadedToken      = errors.New("no loaded token")
 	ErrTokenScopesChanged = errors.New("requested scopes have changed")
-	ErrNoOIDCConfig       = errors.New("oidc config was not provided or cached")
+	ErrNoOIDCConfig       = errors.New("no oidc configuration was provided or cached")
 )
 
 type promptFunc func(authURL string) error
@@ -170,14 +170,7 @@ func WithRefreshToken(refreshToken string) Option {
 			}
 		}
 		tok.RefreshToken = refreshToken
-		b := strings.Builder{}
-		if err := json.NewEncoder(&b).Encode(tok); err != nil {
-			return err
-		} else if err := keyring.Set(ta.keychainName(), "token", b.String()); err != nil {
-			return err
-		} else {
-			return nil
-		}
+		return ta.setToken(tok)
 	}
 }
 
@@ -214,7 +207,7 @@ func NewTerminalAuth(ctx context.Context, serviceIdentifier string, options ...O
 		return nil, fmt.Errorf("failed to load cached oidc settings: %v", err)
 	}
 
-	if ta.issuerURL == "" || ta.clientID == "" {
+	if ta.issuerURL == "" {
 		return nil, ErrNoOIDCConfig
 	}
 
@@ -251,7 +244,7 @@ func NewTerminalAuth(ctx context.Context, serviceIdentifier string, options ...O
 	} else if newToken, err := ta.TokenSource(ctx).Token(); err != nil {
 		// failed to refresh the old token
 		ta.logger.Printf("Stored token is not usable: %v\n", err)
-		return ta, nil
+		return ta, err
 	} else {
 		// keep the most recent refreshed token
 		ta.lastGoodToken = newToken
@@ -474,21 +467,21 @@ func (ta *TerminalAuth) loadOIDC() error {
 // loadToken loads cached token data
 func (ta *TerminalAuth) loadToken() error {
 	tok := oauth2.Token{}
-	if data, err := keyring.Get(ta.keychainName(), scopesKey); err != nil {
+	if scopesData, err := keyring.Get(ta.keychainName(), scopesKey); err != nil {
 		if err == keyring.ErrNotFound {
 			return ErrNoSavedToken
 		} else {
 			return err
 		}
-	} else if data != ta.scopeHash() {
+	} else if scopesData != ta.scopeHash() {
 		return ErrTokenScopesChanged
-	} else if data, err := keyring.Get(ta.keychainName(), tokenKey); err != nil {
+	} else if tokenData, err := keyring.Get(ta.keychainName(), tokenKey); err != nil {
 		if err == keyring.ErrNotFound {
 			return ErrNoSavedToken
 		} else {
 			return err
 		}
-	} else if err := json.NewDecoder(strings.NewReader(data)).Decode(&tok); err != nil {
+	} else if err := json.NewDecoder(strings.NewReader(tokenData)).Decode(&tok); err != nil {
 		return err
 	} else if idToken, err := keyring.Get(ta.keychainName(), idTokenKey); err != nil {
 		if err == keyring.ErrNotFound {
