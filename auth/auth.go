@@ -17,6 +17,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	pkce "github.com/nirasan/go-oauth-pkce-code-verifier"
 	"github.com/pkg/browser"
+	"github.com/sirupsen/logrus"
 	"github.com/zalando/go-keyring"
 	"golang.org/x/oauth2"
 )
@@ -52,7 +53,7 @@ type TerminalAuth struct {
 	provider          *oidc.Provider
 	port              int16
 	redirectURL       string
-	logger            *log.Logger
+	logger            logrus.StdLogger
 	clientSecret      string
 	prompt            promptFunc
 	keychainPrefix    string
@@ -83,7 +84,7 @@ func WithIssuerURL(issuerURL string) Option {
 }
 
 // WithLogger installs a custom logger instance
-func WithLogger(logger *log.Logger) Option {
+func WithLogger(logger logrus.StdLogger) Option {
 	return func(ta *TerminalAuth) error {
 		ta.logger = logger
 		return nil
