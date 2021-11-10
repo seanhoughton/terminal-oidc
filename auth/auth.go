@@ -238,7 +238,7 @@ func NewTerminalAuth(ctx context.Context, serviceIdentifier string, options ...O
 		ClientSecret: ta.clientSecret,
 		Endpoint:     ta.provider.Endpoint(),
 		Scopes:       ta.scopes,
-		RedirectURL:  fmt.Sprintf("http://localhost:%d/auth/callback", ta.port),
+		RedirectURL:  ta.redirectURL,
 	}
 
 	ta.tokenVerifier = ta.provider.Verifier(oidcConfig)
@@ -246,20 +246,9 @@ func NewTerminalAuth(ctx context.Context, serviceIdentifier string, options ...O
 	// restore the saved token if it exists
 	if err := ta.loadToken(); err != nil && err != ErrNoSavedToken && err != ErrTokenScopesChanged {
 		return nil, err
-	} else if ta.HasValidToken() {
-		// we have a valid token that's not timed out
-		ta.logger.Println("Loaded token is valid and has not expired")
-		// override the loaded refresh token
-		return ta, nil
-	} else if newToken, err := ta.TokenSource(ctx).Token(); err != nil {
-		// failed to refresh the old token
-		ta.logger.Printf("Stored token is not usable: %v\n", err)
-		return ta, err
-	} else {
-		// keep the most recent refreshed token
-		ta.lastGoodToken = newToken
-		return ta, nil
 	}
+
+	return ta, nil
 }
 
 func (ta *TerminalAuth) Token(ctx context.Context) (*oauth2.Token, error) {
@@ -424,7 +413,9 @@ func (ta *TerminalAuth) AccessClient(ctx context.Context) *http.Client {
 // IDClient returns an http client which uses the ID token and will automatically refresh
 // it when the token expires
 func (ta *TerminalAuth) IDClient(ctx context.Context) *http.Client {
-	return NewIDClient(ctx, ta.TokenSource(ctx))
+	return &http.Client{
+		Transport: NewIDTransport(ctx, ta.TokenSource(ctx), http.DefaultTransport),
+	}
 }
 
 func (ta *TerminalAuth) keychainName() string {

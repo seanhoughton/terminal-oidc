@@ -99,11 +99,11 @@ func cloneRequest(r *http.Request) *http.Request {
 	return r2
 }
 
-func NewIDClient(ctx context.Context, src oauth2.TokenSource) *http.Client {
-	return &http.Client{
-		Transport: &Transport{
-			Base:   http.DefaultTransport,
-			Source: oauth2.ReuseTokenSource(nil, src),
-		},
+// NewIDTransport returns a RoundTripper that sets the Authorization header and automatically
+// refreshes the token when it expires
+func NewIDTransport(ctx context.Context, src oauth2.TokenSource, base http.RoundTripper) http.RoundTripper {
+	return &Transport{
+		Base:   base,
+		Source: oauth2.ReuseTokenSource(nil, src),
 	}
 }
