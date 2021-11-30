@@ -39,6 +39,9 @@ var (
 	ErrNoLoadedToken      = errors.New("no loaded token")
 	ErrTokenScopesChanged = errors.New("requested scopes have changed")
 	ErrNoOIDCConfig       = errors.New("no oidc configuration was provided or cached")
+	ErrNoIDToken          = errors.New("no id token")
+
+	keyringKeys = []string{oidcIssuerURLKey, oidcClientIDKey, oidcClientSecretKey, scopesKey, tokenKey, idTokenKey}
 )
 
 type promptFunc func(authURL string) error
@@ -171,6 +174,7 @@ func WithNoPersistence() Option {
 func WithRefreshToken(refreshToken string) Option {
 	return func(ta *TerminalAuth) error {
 		tok := &oauth2.Token{}
+		tok = tok.WithExtra(map[string]interface{}{"id_token": ""})
 		if data, err := keyring.Get(ta.keychainName(), "token"); err != nil && err != keyring.ErrNotFound {
 			return err
 		} else if err == nil {
@@ -180,6 +184,8 @@ func WithRefreshToken(refreshToken string) Option {
 			}
 		}
 		tok.RefreshToken = refreshToken
+		// we ignore missing ID token errors given that we're just saving an empty
+		// token with
 		return ta.setToken(tok)
 	}
 }
@@ -202,14 +208,16 @@ func NewTerminalAuth(ctx context.Context, serviceIdentifier string, options ...O
 	}
 	WithLogger(log.Default())(ta)
 	WithRedirect(defaultRedirect)(ta)
-	WithScopes(oidc.ScopeOpenID, "profile", "email")(ta)
+	WithScopes(oidc.ScopeOpenID)(ta)
 	WithStdoutPrompt()(ta)
 	WithKeychainPrefix("terminaloidc")(ta)
 	WithSuccessBody(defaultSuccessBody)(ta)
 
 	// options
 	for _, opt := range options {
-		opt(ta)
+		if err := opt(ta); err != nil {
+			return nil, err
+		}
 	}
 
 	// load any unset values from the cache
@@ -256,8 +264,16 @@ func (ta *TerminalAuth) Token(ctx context.Context) (*oauth2.Token, error) {
 }
 
 // HasValidToken returns "true" if a non-expired token has been loaded
-func (ta *TerminalAuth) HasValidToken() bool {
-	return ta.lastGoodToken != nil && ta.lastGoodToken.Valid()
+func (ta *TerminalAuth) HasValidToken(ctx context.Context) bool {
+	if ta.lastGoodToken == nil {
+		return false
+	} else if ta.lastGoodToken.Valid() {
+		return true
+	} else if _, err := ta.TokenSource(ctx).Token(); err != nil {
+		return false
+	} else {
+		return true
+	}
 }
 
 // Login will present a URL to the terminal for the user to click and then follow the oauth2 flow
@@ -275,7 +291,7 @@ func (ta *TerminalAuth) IDToken(ctx context.Context) (*oidc.IDToken, error) {
 	if ta.lastGoodToken == nil {
 		return nil, ErrNoLoadedToken
 	} else if rawIDToken, ok := ta.lastGoodToken.Extra("id_token").(string); !ok {
-		return nil, fmt.Errorf("invalid loaded token")
+		return nil, ErrNoIDToken
 	} else if idToken, err := ta.tokenVerifier.Verify(ctx, rawIDToken); err != nil {
 		return nil, err
 	} else {
@@ -372,7 +388,7 @@ func (ta *TerminalAuth) login(ctx context.Context) (*oauth2.Token, error) {
 		// Extract the ID Token from OAuth2 token.
 		rawIDToken, ok := oauth2Token.Extra("id_token").(string)
 		if !ok {
-			cleanup(w, err)
+			cleanup(w, ErrNoIDToken)
 			return
 		}
 
@@ -520,11 +536,11 @@ func (ta *TerminalAuth) setToken(tok *oauth2.Token) error {
 	} else if err := keyring.Set(ta.keychainName(), tokenKey, b.String()); err != nil {
 		return err
 	} else if idToken, ok := tok.Extra("id_token").(string); !ok {
-		return fmt.Errorf("bad id token")
+		return ErrNoIDToken
 	} else if err := keyring.Set(ta.keychainName(), idTokenKey, idToken); err != nil {
 		return err
 	} else {
-		ta.logger.Printf("Token updated and saved as %s (field: token)\n", ta.keychainName())
+		ta.logger.Printf("Token updated and saved as %s in [fields: %v]\n", ta.keychainName(), keyringKeys)
 		return nil
 	}
 }

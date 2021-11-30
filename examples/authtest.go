@@ -19,6 +19,7 @@ import (
 var issuer = os.Getenv("AUTH_ISSUER")
 var clientID = os.Getenv("AUTH_CLIENT_ID")
 var clientSecret = os.Getenv("AUTH_CLIENT_SECRET")
+var serviceID = os.Getenv("AUTH_SERVICE_ID")
 
 func main() {
 
@@ -35,8 +36,8 @@ func main() {
 		auth.WithIssuerURL(issuer),
 		auth.WithClientSecret(clientSecret),
 		auth.WithLogger(logger),
-		auth.WithScopes(oidc.ScopeOfflineAccess),
-		auth.WithRedirectPort(19978),
+		auth.WithScopes(oidc.ScopeOpenID, oidc.ScopeOfflineAccess, "groups"),
+		//auth.WithRedirect("http://127.0.0.1:19978/login/callback"),
 	}
 	if *refreshToken != "" {
 		options = append(options, auth.WithRefreshToken(*refreshToken))
@@ -44,15 +45,15 @@ func main() {
 	if *scopes != "" {
 		options = append(options, auth.WithScopes(strings.Split(*scopes, ",")...))
 	}
-	const serviceIdentifier = "http://localhost:8080"
+
 	ta, err := auth.NewTerminalAuth(ctx,
-		serviceIdentifier,
+		serviceID,
 		options...)
 	if err != nil {
 		logger.Fatal(err)
 	}
 
-	if !ta.HasValidToken() {
+	if !ta.HasValidToken(ctx) {
 		if err := ta.Login(ctx); err != nil {
 			logger.Fatalf("Failed to log in: %v", err)
 		}
@@ -81,24 +82,35 @@ func main() {
 		logger.Printf("id info:   %v\n", claims)
 		logger.Println("----------------------------------------")
 
-		if err := localhost(ctx, ta.IDClient(ctx), logger); err != nil {
-			log.Fatal(err)
+		userInfoClaims := struct {
+			Groups []string `json:"groups"`
+		}{}
+		if userInfo, err := ta.UserInfo(ctx); err != nil {
+			logger.Fatal(err)
+		} else if err := userInfo.Claims(&userInfoClaims); err != nil {
+			logger.Fatal(err)
+		} else {
+			logger.Printf("%v", userInfoClaims)
 		}
+
+		//if err := localhost(ctx, ta.IDClient(ctx), logger); err != nil {
+		//	log.Fatal(err)
+		//}
 	}
 
 	// now create a new auth client and re-use cached values
 
-	if ta2, err := auth.NewTerminalAuth(ctx,
-		serviceIdentifier,
-		auth.WithLogger(logger),
-		auth.WithScopes(oidc.ScopeOfflineAccess),
-	); err != nil {
-		logger.Fatal(err)
-	} else {
-		if err := localhost(ctx, ta2.IDClient(ctx), logger); err != nil {
+	/*
+
+		if ta2, err := auth.NewTerminalAuth(ctx,
+			serviceIdentifier,
+			auth.WithLogger(logger),
+			auth.WithScopes(oidc.ScopeOfflineAccess),
+		); err != nil {
 			logger.Fatal(err)
-		}
-	}
+		} else if err := localhost(ctx, ta2.IDClient(ctx), logger); err != nil {
+			logger.Fatal(err)
+		}*/
 }
 
 func localhost(ctx context.Context, client *http.Client, logger *log.Logger) error {
