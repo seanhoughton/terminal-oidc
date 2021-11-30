@@ -3,6 +3,9 @@
 github.com/coreos/go-oidc/v3/oidc
 # github.com/danieljoos/wincred v1.1.0
 github.com/danieljoos/wincred
+# github.com/dgrijalva/jwt-go v3.2.0+incompatible
+## explicit
+github.com/dgrijalva/jwt-go
 # github.com/godbus/dbus/v5 v5.0.3
 github.com/godbus/dbus/v5
 # github.com/golang/protobuf v1.4.2

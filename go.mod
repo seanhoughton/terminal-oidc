@@ -4,6 +4,7 @@ go 1.16
 
 require (
 	github.com/coreos/go-oidc/v3 v3.0.0
+	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/nirasan/go-oauth-pkce-code-verifier v0.0.0-20170819232839-0fbfe93532da
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8
 	github.com/sirupsen/logrus v1.8.1
