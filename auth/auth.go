@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -55,7 +56,7 @@ type TerminalAuth struct {
 	authConfig        *oauth2.Config
 	lastGoodToken     *oauth2.Token
 	provider          *oidc.Provider
-	port              int16
+	port              uint16
 	redirectURL       string
 	logger            logrus.StdLogger
 	clientSecret      string
@@ -100,10 +101,10 @@ func WithRedirect(redirect string) Option {
 	return func(ta *TerminalAuth) error {
 		if parsed, err := url.Parse(redirect); err != nil {
 			return err
-		} else if port, err := strconv.ParseInt(parsed.Port(), 10, 16); err != nil {
+		} else if port, err := strconv.ParseUint(parsed.Port(), 10, 16); err != nil {
 			return err
 		} else {
-			ta.port = int16(port)
+			ta.port = uint16(port)
 			ta.redirectURL = redirect
 		}
 		return nil
@@ -135,6 +136,26 @@ func WithBrowserPrompt() Option {
 	return func(ta *TerminalAuth) error {
 		ta.prompt = func(authURL string) error {
 			return browser.OpenURL(authURL)
+		}
+		return nil
+	}
+}
+
+// WithAutoFollowRedirectForTesting will follow the redirect for automated testing purposes only
+func WithAutoFollowRedirectForTesting() Option {
+	return func(ta *TerminalAuth) error {
+		ta.prompt = func(authURL string) error {
+			if resp, err := http.Get(authURL); err != nil {
+				return err
+			} else if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("authorization endpoint responded with %s", resp.Status)
+			} else if resp.Body == nil {
+				return nil
+			} else if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+				return err
+			} else {
+				return resp.Body.Close()
+			}
 		}
 		return nil
 	}
@@ -564,4 +585,13 @@ func (ta *TerminalAuth) save(tok *oauth2.Token) error {
 		ta.logger.Printf("Token updated and saved as %s in [fields: %v]\n", ta.keychainName(), keyringKeys)
 		return nil
 	}
+}
+
+func (ta *TerminalAuth) Logout() error {
+	for _, key := range keyringKeys {
+		if err := keyring.Delete(ta.keychainName(), key); err != nil && err != keyring.ErrNotFound {
+			return fmt.Errorf("Failed to delete keyring key %s: %w", key, err)
+		}
+	}
+	return nil
 }

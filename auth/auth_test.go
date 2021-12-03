@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -26,6 +27,7 @@ func TestNoConfigShouldError(t *testing.T) {
 
 const refreshToken = "myrefreshtoken"
 const clientName = "myclient"
+const accessToken = "the_opaque_access_token"
 
 var signingKey = []byte("mysigningkey")
 
@@ -60,7 +62,16 @@ func mockAuthServer(t *testing.T) *httptest.Server {
 				t.Error(err)
 			}
 		case "/authorize":
-			// ??
+			// respond with a fake token
+			redirect := r.URL.Query().Get("redirect_uri")
+			if redirect == "" {
+				t.Fatalf("missing redirect_uri")
+			} else if resp, err := http.Post(fmt.Sprintf("%s?%s", redirect, "code=12345"), "application/text", nil); err != nil {
+				t.Error(err)
+			} else {
+				resp.Body.Close()
+			}
+
 		case "/token":
 			if err := r.ParseForm(); err != nil {
 				t.Error(err)
@@ -69,7 +80,8 @@ func mockAuthServer(t *testing.T) *httptest.Server {
 			} else if r.Form.Get("grant_type") != "refresh_token" {
 				t.Errorf("incorrect grant type: got %s, expected %s", r.Form.Get("grant_type"), "refresh_token")
 			}
-			// don't need to check client id, etc. - we're not testing the oauth2 module
+			// don't need to check client id, etc. because we're not testing the oauth2 module itself
+			// just testing the use of it
 
 			w.Header().Set("content-type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -83,7 +95,7 @@ func mockAuthServer(t *testing.T) *httptest.Server {
 			if idTokenEncoded, err := idToken.SignedString(signingKey); err != nil {
 				t.Error(err)
 			} else if err := json.NewEncoder(w).Encode(&tokenJSON{
-				AccessToken:  "the_opaque_access_token",
+				AccessToken:  accessToken,
 				TokenType:    "Bearer",
 				ExpiresIn:    3600,
 				RefreshToken: refreshToken,
@@ -96,6 +108,31 @@ func mockAuthServer(t *testing.T) *httptest.Server {
 	return svr
 }
 
+/*
+// this needs more work - it requires some type of delay-then-
+func TestLogin(t *testing.T) {
+	ctx := context.Background()
+	svr := mockAuthServer(t)
+	defer svr.Close()
+
+	// create a client that loads above token and refreshes it
+	opts := []Option{
+		WithNoPersistence(),
+		WithAutoFollowRedirectForTesting(),
+		WithRedirect(svr.URL),
+		WithKeychainPrefix("test"),
+		WithIssuerURL(svr.URL),
+		WithClientID(clientName),
+	}
+
+	if a, err := NewTerminalAuth(ctx, "test", opts...); err != nil {
+		t.Error(err)
+	} else if err := a.Login(ctx); err != nil {
+		t.Error(err)
+	}
+}
+*/
+
 func TestRefreshExpiredToken(t *testing.T) {
 	ctx := context.Background()
 	svr := mockAuthServer(t)
@@ -103,10 +140,10 @@ func TestRefreshExpiredToken(t *testing.T) {
 
 	// stash an existing token into the storage
 	//
-	keyring.MockInit() // manually set this so we always use the in-memory store
+	keyring.MockInit() // manually set this so we always use the same in-memory store
 	token := &oauth2.Token{
 		Expiry:       time.Now(),
-		AccessToken:  "the_opaque_access_token",
+		AccessToken:  accessToken,
 		TokenType:    "Bearer",
 		RefreshToken: refreshToken,
 	}
