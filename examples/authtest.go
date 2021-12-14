@@ -48,6 +48,7 @@ func main() {
 
 	ta, err := auth.NewTerminalAuth(ctx,
 		serviceID,
+		auth.NewEphemeralStorage(),
 		options...)
 	if err != nil {
 		logger.Fatal(err)

@@ -16,7 +16,7 @@ import (
 
 func TestNoConfigShouldError(t *testing.T) {
 	ctx := context.Background()
-	_, err := NewTerminalAuth(ctx, "test", WithNoPersistence())
+	_, err := NewTerminalAuth(ctx, "test", NewEphemeralStorage())
 	if err == nil {
 		t.Fatal("No config should produce an error")
 	}
@@ -138,6 +138,8 @@ func TestRefreshExpiredToken(t *testing.T) {
 	svr := mockAuthServer(t)
 	defer svr.Close()
 
+	store := NewEphemeralStorage()
+
 	// stash an existing token into the storage
 	//
 	keyring.MockInit() // manually set this so we always use the same in-memory store
@@ -158,7 +160,7 @@ func TestRefreshExpiredToken(t *testing.T) {
 	} else {
 		token = token.WithExtra(map[string]interface{}{"id_token": idTokenEncoded})
 	}
-	if err := saveToken(token, "test-test"); err != nil {
+	if err := saveToken(store, token, "test-test"); err != nil {
 		t.Error(err)
 	}
 
@@ -169,7 +171,7 @@ func TestRefreshExpiredToken(t *testing.T) {
 		WithClientID(clientName),
 	}
 
-	if a, err := NewTerminalAuth(ctx, "test", opts...); err != nil {
+	if a, err := NewTerminalAuth(ctx, "test", store, opts...); err != nil {
 		t.Error(err)
 	} else if tok, err := a.Token(ctx); err != nil {
 		t.Error(err)
@@ -186,14 +188,13 @@ func TestRestoreUsingOnlyRefreshToken(t *testing.T) {
 	defer svr.Close()
 
 	opts := []Option{
-		WithNoPersistence(),
 		WithKeychainPrefix("test"),
 		WithIssuerURL(svr.URL),
 		WithClientID("myclient"),
 		WithRefreshToken("myrefreshtoken"),
 	}
 
-	if a, err := NewTerminalAuth(ctx, "test", opts...); err != nil {
+	if a, err := NewTerminalAuth(ctx, "test", NewEphemeralStorage(), opts...); err != nil {
 		t.Error(err)
 	} else if tok, err := a.Token(ctx); err != nil {
 		t.Error(err)
