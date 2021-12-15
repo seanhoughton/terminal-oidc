@@ -108,19 +108,21 @@ func NewEphemeralStorage() Storage {
 
 // ViperStorage state is stored in viper config and saved after each change
 type ViperStorage struct {
+	prefix    string
 	delimiter string
 	v         *viper.Viper
 }
 
-func NewViperStorage(v *viper.Viper, delimiter string) Storage {
+func NewViperStorage(v *viper.Viper, prefix, delimiter string) Storage {
 	return &ViperStorage{
 		v:         v,
+		prefix:    prefix,
 		delimiter: delimiter,
 	}
 }
 
 func (p *ViperStorage) key(service, setting string) string {
-	return fmt.Sprintf("oidc%s%s%s%s", p.delimiter, service, p.delimiter, setting)
+	return p.prefix + p.delimiter + service + p.delimiter + setting
 }
 
 // Set password in keyring for user

@@ -28,7 +28,7 @@ func TestStorage(t *testing.T) {
 	tests := map[string]Storage{
 		"ephemeral": NewEphemeralStorage(),
 		"keyring":   NewKeyringStorage(),
-		"viper":     NewViperStorage(v, "_"),
+		"viper":     NewViperStorage(v, "oidc", "_"),
 	}
 
 	defer os.RemoveAll("config.yaml")
