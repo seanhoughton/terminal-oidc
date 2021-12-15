@@ -1,10 +1,9 @@
 package auth
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 
+	"github.com/spf13/viper"
 	"github.com/zalando/go-keyring"
 )
 
@@ -107,68 +106,32 @@ func NewEphemeralStorage() Storage {
 	return &EphemeralStorage{}
 }
 
-// FileStorage state is stored in a regular file and is not as
-// secure as the Keyring persistence
-type FileStorage struct {
-	filename string
+// ViperStorage state is stored in viper config and saved after each change
+type ViperStorage struct {
+	delimiter string
+	v         *viper.Viper
 }
 
-func NewFileStorage(filename string) Storage {
-	return &FileStorage{filename: filename}
-}
-
-type savedCredentials map[string]map[string]string
-
-func (p *FileStorage) load() (savedCredentials, error) {
-	creds := savedCredentials{}
-	if f, err := os.Open(p.filename); err != nil && !os.IsNotExist(err) {
-		return nil, err
-	} else if os.IsNotExist(err) {
-		// new settings
-		return creds, nil
-	} else if err := json.NewDecoder(f).Decode(&creds); err != nil {
-		_ = f.Close()
-		return nil, err
-	} else if err := f.Close(); err != nil {
-		return nil, err
-	} else {
-		return creds, nil
+func NewViperStorage(v *viper.Viper, delimiter string) Storage {
+	return &ViperStorage{
+		v:         v,
+		delimiter: delimiter,
 	}
 }
 
-func (p *FileStorage) save(credentials savedCredentials) error {
-	if f, err := os.Create(p.filename); err != nil {
-		return err
-	} else if err := json.NewEncoder(f).Encode(credentials); err != nil {
-		_ = f.Close()
-		return err
-	} else if err := f.Close(); err != nil {
-		return err
-	} else {
-		return nil
-	}
+func (p *ViperStorage) key(service, setting string) string {
+	return fmt.Sprintf("oidc%s%s%s%s", p.delimiter, service, p.delimiter, setting)
 }
 
 // Set password in keyring for user
-func (p *FileStorage) Set(service, setting, value string) error {
-	creds, err := p.load()
-	if err != nil {
-		return err
-	}
-	if _, ok := creds[service]; !ok {
-		creds[service] = map[string]string{}
-	}
-	creds[service][setting] = value
-	return p.save(creds)
+func (p *ViperStorage) Set(service, setting, value string) error {
+	p.v.Set(p.key(service, setting), value)
+	return nil
 }
 
 // Get setting given service and setting name
-func (p *FileStorage) Get(service, setting string) (string, error) {
-	if creds, err := p.load(); err != nil {
-		return "", err
-	} else if svc, ok := creds[service]; !ok {
-		return "", ErrSettingNotFound
-	} else if val, ok := svc[setting]; !ok {
+func (p *ViperStorage) Get(service, setting string) (string, error) {
+	if val := p.v.GetString(p.key(service, setting)); val == "" {
 		return "", ErrSettingNotFound
 	} else {
 		return val, nil
@@ -176,17 +139,10 @@ func (p *FileStorage) Get(service, setting string) (string, error) {
 }
 
 // Delete setting
-func (p *FileStorage) Delete(service, setting string) error {
-	creds, err := p.load()
-	if err != nil {
+func (p *ViperStorage) Delete(service, setting string) error {
+	if _, err := p.Get(service, setting); err != nil {
 		return err
-	}
-	if svc, ok := creds[service]; !ok {
-		return ErrSettingNotFound
-	} else if _, ok := svc[setting]; !ok {
-		return ErrSettingNotFound
 	} else {
-		delete(creds[service], setting)
-		return p.save(creds)
+		return p.Set(service, setting, "")
 	}
 }
