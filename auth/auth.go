@@ -354,8 +354,13 @@ func (ta *TerminalAuth) login(ctx context.Context) (*oauth2.Token, error) {
 		Addr: fmt.Sprintf("localhost:%d", ta.port),
 	}
 
+	srvContext, cancel := context.WithCancel(ctx)
+
 	var tokenErr error
+	tokChannel := make(chan *oauth2.Token, 1)
+
 	cleanup := func(w http.ResponseWriter, err error) {
+		close(tokChannel)
 		tokenErr = err
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -367,15 +372,20 @@ func (ta *TerminalAuth) login(ctx context.Context) (*oauth2.Token, error) {
 
 		go func() {
 			// do this asynchronously so the response can be written
-			if err := handleRedirect.Shutdown(ctx); err != nil {
+			if err := handleRedirect.Shutdown(srvContext); err != nil {
 				ta.logger.Println(err)
 			}
+			cancel()
 		}()
 	}
-
-	var tok *oauth2.Token
+	
 	handleRedirect.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ta.logger.Println("Received auth callback")
+		select {
+		case <-srvContext.Done():
+			return
+		default:
+		} 
 
 		if r.URL.Query().Get("error") != "" {
 			cleanup(w, fmt.Errorf("%s", r.URL.Query().Get("error_description")))
@@ -417,20 +427,31 @@ func (ta *TerminalAuth) login(ctx context.Context) (*oauth2.Token, error) {
 		}
 
 		ta.logger.Println("Received valid token")
-		tok = oauth2Token
+		tokChannel <- oauth2Token
 		cleanup(w, nil)
-
 	})
 
 	ta.logger.Printf("Waiting for redirect to %s\n", ta.authConfig.RedirectURL)
-	if err := handleRedirect.ListenAndServe(); err != http.ErrServerClosed {
-		return nil, err
+	go func () {
+		if err := handleRedirect.ListenAndServe(); err != http.ErrServerClosed {
+			ta.logger.Printf("Failed running http redirect server: %v", err)
+		}
+		cancel()
+	} ()
+
+	<-srvContext.Done()
+	if err := handleRedirect.Shutdown(ctx); err != nil {
+		ta.logger.Println(err)
 	}
 
 	if tokenErr != nil {
 		return nil, tokenErr
 	}
-	return tok, nil
+	for tok := range tokChannel {
+		return tok, nil
+	}
+	// happens if context cancelled without redirect
+	return nil, fmt.Errorf("context cancelled")
 }
 
 func (ta *TerminalAuth) TokenSource(ctx context.Context) oauth2.TokenSource {
