@@ -141,6 +141,14 @@ func WithBrowserPrompt() Option {
 	}
 }
 
+// WithCustomPrompt calls a custom function to handle the prompt
+func WithCustomPrompt(prompt func(authURL string) error) Option {
+	return func(ta *TerminalAuth) error {
+		ta.prompt = prompt
+		return nil
+	}
+}
+
 // WithAutoFollowRedirectForTesting will follow the redirect for automated testing purposes only
 func WithAutoFollowRedirectForTesting() Option {
 	return func(ta *TerminalAuth) error {
