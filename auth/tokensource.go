@@ -24,6 +24,7 @@ func NotifyRefreshTokenSource(t *oauth2.Token, src oauth2.TokenSource, f TokenNo
 	return &notifyRefreshTokenSource{
 		new: src,
 		f:   f,
+		t:   t,
 	}
 }
 
